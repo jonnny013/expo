@@ -1,6 +1,10 @@
 import GithubSlugger from 'github-slugger';
 import React from 'react';
 
+import versions from '~/public/static/constants/versions.json';
+
+const { BETA_VERSION, LATEST_VERSION } = versions;
+
 function hasChildren(node: React.ReactNode): node is React.ReactElement {
   return (node as React.ReactElement)?.props?.children !== undefined;
 }
@@ -102,4 +106,20 @@ export function listMissingHashLinkTargets(apiName?: string) {
     console.table(missingEntries);
     console.groupEnd();
   }
+}
+
+export function versionToText(version: string): string {
+  if (version === 'unversioned') {
+    return 'Next (unversioned)';
+  } else if (version === 'latest') {
+    return `${formatSdkVersion(LATEST_VERSION)} (latest)`;
+  } else if (BETA_VERSION && version === BETA_VERSION.toString()) {
+    return `${formatSdkVersion(BETA_VERSION.toString())} (beta)`;
+  }
+
+  return formatSdkVersion(version);
+}
+
+function formatSdkVersion(version: string): string {
+  return version.includes('v') ? `SDK ${version.substring(1, 3)}` : `SDK ${version}`;
 }
