@@ -137,7 +137,12 @@ public class SchedulerModule: Module {
       return trigger
     case yearlyNotificationTriggerType:
       let yearlyTrigger = try YearlyTriggerRecord(from: params, appContext: appContext)
-      let dateComponents: DateComponents = DateComponents(month: yearlyTrigger.month, day: yearlyTrigger.day, hour: yearlyTrigger.hour, minute: yearlyTrigger.minute)
+      let dateComponents: DateComponents = DateComponents(
+        month: yearlyTrigger.month,
+        day: yearlyTrigger.day,
+        hour: yearlyTrigger.hour,
+        minute: yearlyTrigger.minute
+      ))
       var trigger: UNNotificationTrigger?
       try EXNotificationObjcWrapper.tryExecute {
         trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
@@ -210,7 +215,6 @@ public class SchedulerModule: Module {
       UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
     }
 
-    // swiftlint:disable:next line_length
     AsyncFunction("scheduleNotificationAsync") { (identifier: String, notificationSpec: [String: Any], triggerSpec: [String: Any], promise: Promise) in
       guard let request = try? buildNotificationRequest(identifier: identifier, contentInput: notificationSpec, triggerInput: triggerSpec) else {
         promise.reject("ERR_NOTIFICATIONS_FAILED_TO_SCHEDULE", "Failed to build notification request")
