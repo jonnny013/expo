@@ -33,6 +33,33 @@ let dateComponentsMatchMap: [String: Calendar.Component] = [
   "weekdayOrdinal": .weekdayOrdinal
 ]
 
+struct CalendarTriggerRecord: Record {
+  @Field
+  var year: Int?
+  @Field
+  var month: Int?
+  @Field
+  var day: Int?
+  @Field
+  var hour: Int?
+  @Field
+  var minute: Int?
+  @Field
+  var second: Int?
+  @Field
+  var weekday: Int?
+  @Field
+  var weekOfMonth: Int?
+  @Field
+  var weekOfYear: Int?
+  @Field
+  var weekdayOrdinal: Int?
+  @Field
+  var timezone: String?
+  @Field
+  var repeats: Bool?
+}
+
 struct TimeIntervalTriggerRecord: Record {
   @Field
   var seconds: TimeInterval
@@ -82,11 +109,8 @@ struct YearlyTriggerRecord: Record {
 }
 
 public class SchedulerModule: Module {
-  let builder: NotificationBuilder = NotificationBuilder()
-
-  func triggerFromParams(_ params: [String: Any]?) throws -> UNNotificationTrigger? {
-    guard let params = params,
-      let appContext = appContext else {
+  func triggerFromParams(_ params: [String: Any]?, appContext: AppContext) throws -> UNNotificationTrigger? {
+    guard let params = params else {
       return nil
     }
 
@@ -137,15 +161,21 @@ public class SchedulerModule: Module {
       return trigger
     case yearlyNotificationTriggerType:
       let yearlyTrigger = try YearlyTriggerRecord(from: params, appContext: appContext)
-      let dateComponents: DateComponents = DateComponents(month: yearlyTrigger.month, day: yearlyTrigger.day, hour: yearlyTrigger.hour, minute: yearlyTrigger.minute)
+      let dateComponents: DateComponents = DateComponents(
+        month: yearlyTrigger.month,
+        day: yearlyTrigger.day,
+        hour: yearlyTrigger.hour,
+        minute: yearlyTrigger.minute
+      )
       var trigger: UNNotificationTrigger?
       try EXNotificationObjcWrapper.tryExecute {
         trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
       }
       return trigger
     case calendarNotificationTriggerType:
-      let dateComponents: DateComponents = dateComponentsFrom(params) ?? DateComponents()
-      let repeats: Bool = (try? params.verifiedProperty(notificationTriggerRepeatsKey, type: Bool.self)) ?? false
+      let calendarTrigger = try CalendarTriggerRecord(from: params, appContext: appContext)
+      let dateComponents: DateComponents = dateComponentsFrom(calendarTrigger) ?? DateComponents()
+      let repeats = calendarTrigger.repeats ?? false
       var trigger: UNNotificationTrigger?
       try EXNotificationObjcWrapper.tryExecute {
         trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: repeats)
@@ -156,16 +186,16 @@ public class SchedulerModule: Module {
     }
   }
 
-  func dateComponentsFrom(_ params: [String: Any]) -> DateComponents? {
+  func dateComponentsFrom(_ calendarTrigger: CalendarTriggerRecord) -> DateComponents? {
     var dateComponents = DateComponents()
     // TODO: Verify that DoW matches JS getDay()
     dateComponents.calendar = Calendar.init(identifier: .iso8601)
-    if let timeZone = try? params.verifiedProperty(calendarNotificationTriggerTimezoneKey, type: String.self) {
+    if let timeZone = calendarTrigger.timezone {
       dateComponents.timeZone = TimeZone(identifier: timeZone)
     }
     dateComponentsMatchMap.keys.forEach { key in
       let calendarComponent = dateComponentsMatchMap[key] ?? .day
-      if let value = try? params.verifiedProperty(key, type: Int.self) {
+      if let value = calendarTrigger.toDictionary()[key] as? Int {
         dateComponents.setValue(value, for: calendarComponent)
       }
     }
@@ -183,9 +213,16 @@ public class SchedulerModule: Module {
   func buildNotificationRequest(
     identifier: String,
     contentInput: [String: Any],
-    triggerInput: [String: Any]
+    triggerInput: [String: Any]?
   ) throws -> UNNotificationRequest? {
-    return try UNNotificationRequest(identifier: identifier, content: builder.content(contentInput), trigger: triggerFromParams(triggerInput))
+    guard let appContext = appContext else {
+      return nil
+    }
+    return try UNNotificationRequest(
+      identifier: identifier,
+      content: NotificationBuilder.content(contentInput, appContext: appContext),
+      trigger: triggerFromParams(triggerInput, appContext: appContext)
+    )
   }
 
   public func definition() -> ModuleDefinition {
@@ -210,23 +247,27 @@ public class SchedulerModule: Module {
       UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
     }
 
-    // swiftlint:disable:next line_length
-    AsyncFunction("scheduleNotificationAsync") { (identifier: String, notificationSpec: [String: Any], triggerSpec: [String: Any], promise: Promise) in
-      guard let request = try? buildNotificationRequest(identifier: identifier, contentInput: notificationSpec, triggerInput: triggerSpec) else {
-        promise.reject("ERR_NOTIFICATIONS_FAILED_TO_SCHEDULE", "Failed to build notification request")
-        return
-      }
-      UNUserNotificationCenter.current().add(request) {error in
-        if let error = error {
-          promise.reject("ERR_NOTIFICATIONS_FAILED_TO_SCHEDULE", "Failed to schedule notification, \(error)")
-        } else {
-          promise.resolve()
+    AsyncFunction("scheduleNotificationAsync") { (identifier: String, notificationSpec: [String: Any], triggerSpec: [String: Any]?, promise: Promise) in
+      do {
+        guard let request = try buildNotificationRequest(identifier: identifier, contentInput: notificationSpec, triggerInput: triggerSpec) else {
+          promise.reject("ERR_NOTIFICATIONS_FAILED_TO_SCHEDULE", "Failed to build notification request")
+          return
         }
+        UNUserNotificationCenter.current().add(request) {error in
+          if let error = error {
+            promise.reject("ERR_NOTIFICATIONS_FAILED_TO_SCHEDULE", "Failed to schedule notification, \(error)")
+          } else {
+            promise.resolve(identifier)
+          }
+        }
+      } catch {
+        promise.reject("ERR_NOTIFICATIONS_FAILED_TO_SCHEDULE", "Failed to schedule notification, \(error)")
       }
     }
 
     AsyncFunction("getNextTriggerDateAsync") { (triggerSpec: [String: Any], promise: Promise) in
-      guard let trigger = try? triggerFromParams(triggerSpec) else {
+      guard let appContext = appContext,
+        let trigger = try? triggerFromParams(triggerSpec, appContext: appContext) else {
         promise.reject("ERR_NOTIFICATIONS_INVALID_CALENDAR_TRIGGER", "Invalid trigger specification")
         return
       }

@@ -2,54 +2,79 @@
 
 import ExpoModulesCore
 
-@objc(EXNotificationBuilder)
-public class NotificationBuilder: NSObject {
-  @objc(notificationContentFromRequest:error:)
-  public func content(_ request: [String: Any]) throws -> UNMutableNotificationContent {
-    let content = UNMutableNotificationContent()
+struct NotificationRequestRecord: Record {
+  @Field
+  var title: String?
+  @Field
+  var subtitle: String?
+  @Field
+  var body: String?
+  @Field
+  var launchImageName: String?
+  @Field
+  var badge: Int?
+  @Field
+  var userInfo: [String: Any]?
+  @Field
+  var categoryIdentifier: String?
+  @Field
+  var sound: Either<Bool, String>?
+  @Field
+  var attachments: [[String: Any]]?
+  @Field
+  var interruptionLevel: String?
+}
 
-    if let title: String = try? request.verifiedProperty("title", type: String.self) {
+public class NotificationBuilder: NSObject {
+  public class func content(_ request: [String: Any], appContext: AppContext) throws -> UNMutableNotificationContent {
+    let content = UNMutableNotificationContent()
+    let request = try NotificationRequestRecord(from: request, appContext: appContext)
+
+    if let title = request.title {
       content.title = title
     }
 
-    if let subtitle: String = try? request.verifiedProperty("subtitle", type: String.self) {
+    if let subtitle = request.subtitle {
       content.subtitle = subtitle
     }
 
-    if let body: String = try? request.verifiedProperty("body", type: String.self) {
+    if let body = request.body {
       content.body = body
     }
 
-    if let launchImageName: String = try? request.verifiedProperty("launchImageName", type: String.self) {
+    if let launchImageName = request.launchImageName {
       content.launchImageName = launchImageName
     }
 
-    if let badge = try? request.verifiedProperty("badge", type: Int.self) {
+    if let badge = request.badge {
       // swiftlint:disable:next legacy_objc_type
       content.badge = NSNumber.init(value: badge)
     }
 
-    if let userInfo: [String: Any] = try? request.verifiedProperty("userInfo", type: [String: Any].self) {
+    if let userInfo = request.userInfo {
       content.userInfo = userInfo
     }
 
-    if let categoryIdentifier: String = try? request.verifiedProperty("categoryIdentifier", type: String.self) {
+    if let categoryIdentifier = request.categoryIdentifier {
       content.categoryIdentifier = categoryIdentifier
     }
 
-    if let sound = request["sound"] as? Bool {
-      content.sound = sound ? .default : .none
-    } else if let soundName = request["sound"] as? String {
-      if soundName == "default" {
-        content.sound = UNNotificationSound.default
-      } else if soundName == "defaultCritical" {
-        content.sound = UNNotificationSound.defaultCritical
-      } else {
-        content.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: soundName))
+    if let sound = request.sound {
+      if let soundBool = try? sound.as(Bool.self) {
+        content.sound = soundBool ? .default : .none
+      } else if let soundName = try? sound.as(String.self) {
+        if soundName == "default" {
+          content.sound = UNNotificationSound.default
+        } else if soundName == "defaultCritical" {
+          content.sound = UNNotificationSound.defaultCritical
+        } else {
+          content.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: soundName))
+        }
       }
     }
+
     var attachments: [UNNotificationAttachment] = []
-    if let attachmentsArray = request["attachments"] as? [[String: Any]] {
+    if let attachmentsArray = request.attachments {
       for attachmentObject in attachmentsArray {
         if let attachment: UNNotificationAttachment = attachment(attachmentObject) {
           attachments.append(attachment)
@@ -57,14 +82,14 @@ public class NotificationBuilder: NSObject {
       }
     }
     content.attachments = attachments
-    if let interruptionLevel = request["interruptionLevel"] as? String {
+    if let interruptionLevel = request.interruptionLevel {
       content.interruptionLevel = deserializeInterruptionLevel(interruptionLevel)
     }
 
     return content
   }
 
-  func attachment(_ request: [String: Any]) -> UNNotificationAttachment? {
+  class func attachment(_ request: [String: Any]) -> UNNotificationAttachment? {
     let identifier = request["identifier"] as? String ?? ""
     let uri = request["uri"] as? String ?? ""
     do {
@@ -81,7 +106,7 @@ public class NotificationBuilder: NSObject {
     }
   }
 
-  func attachmentOptions(_ request: [String: Any]) -> [String: Any] {
+  class func attachmentOptions(_ request: [String: Any]) -> [String: Any] {
     var options: [String: Any] = [:]
     if let typeHint = request["typeHint"] as? String {
       options[UNNotificationAttachmentOptionsTypeHintKey] = typeHint
@@ -110,7 +135,7 @@ public class NotificationBuilder: NSObject {
     return options
   }
 
-  func deserializeInterruptionLevel(_ interruptionLevel: String) -> UNNotificationInterruptionLevel {
+  class func deserializeInterruptionLevel(_ interruptionLevel: String) -> UNNotificationInterruptionLevel {
     switch interruptionLevel {
     case "passive": return .passive
     case "active": return .active
